@@ -4,68 +4,101 @@ class MigrationManager {
     private $pdo;
     private $migrationsPath;
 
+    // Constructor que recibe la conexión PDO y la ruta de las migraciones
     public function __construct($pdo, $migrationsPath) {
         $this->pdo = $pdo;
         $this->migrationsPath = $migrationsPath;
     }
 
+    // Ejecutar todas las migraciones pendientes
     public function migrate() {
-        $this->createMigrationsTableIfNotExists();
+        // Crear la tabla de migraciones si no existe
+        $this->createMigrationTableIfNeeded();
 
+        // Obtener migraciones aplicadas y disponibles
         $appliedMigrations = $this->getAppliedMigrations();
-        $migrationFiles = $this->getMigrationFiles();
-        $newMigrations = array_diff($migrationFiles, $appliedMigrations);
+        $availableMigrations = $this->getAvailableMigrations();
 
-        foreach ($newMigrations as $migration) {
-            try {
-                $this->pdo->beginTransaction();
-                $this->applyMigration($migration);
-                $this->pdo->commit();
-            } catch (Exception $e) {
-                $this->pdo->rollBack();
-                echo "Error applying migration '$migration': " . $e->getMessage() . "\n";
-                exit;
-            }
+        // Identificar migraciones pendientes
+        $migrationsToApply = array_diff($availableMigrations, $appliedMigrations);
+
+        if (empty($migrationsToApply)) {
+            echo "No hay nuevas migraciones para aplicar.\n";
+            return;
         }
 
-        if (empty($newMigrations)) {
-            echo "No new migrations to apply.\n";
-        } else {
-            echo "All migrations applied successfully.\n";
+        // Aplicar migraciones pendientes
+        foreach ($migrationsToApply as $migration) {
+            echo "Aplicando migración: $migration\n";
+            $this->applyMigration($migration);
         }
+
+        echo "Todas las migraciones han sido aplicadas.\n";
     }
 
-    private function createMigrationsTableIfNotExists() {
-        $this->pdo->exec("CREATE TABLE IF NOT EXISTS migrations (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            migration NVARCHAR(255) NOT NULL,
-            applied_at DATETIME DEFAULT GETDATE()
-        )");
+    // Crear la tabla de migraciones si no existe
+    private function createMigrationTableIfNeeded() {
+        $query = "
+        IF NOT EXISTS (
+            SELECT * FROM sysobjects WHERE name = 'migration_versions' AND xtype = 'U'
+        )
+        CREATE TABLE migration_versions (
+            version VARCHAR(255) PRIMARY KEY,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )";
+        $this->pdo->exec($query);
     }
 
+    // Obtener las migraciones que ya han sido aplicadas
     private function getAppliedMigrations() {
-        $statement = $this->pdo->query("SELECT migration FROM migrations");
-        return $statement->fetchAll(PDO::FETCH_COLUMN);
+        $query = "SELECT version FROM migration_versions";
+        $stmt = $this->pdo->query($query);
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
-    private function getMigrationFiles() {
+    // Obtener las migraciones disponibles en el directorio
+    private function getAvailableMigrations() {
         $files = scandir($this->migrationsPath);
-        $migrations = array_filter($files, function ($file) {
-            return pathinfo($file, PATHINFO_EXTENSION) === 'sql';
-        });
-        sort($migrations);
-        return $migrations;
+        return array_filter($files, fn($file) => preg_match('/\.php$/', $file));
     }
 
+    // Aplicar una migración
     private function applyMigration($migration) {
-        $sql = file_get_contents($this->migrationsPath . '/' . $migration);
-        $this->pdo->exec($sql);
-        $this->logMigration($migration);
-        echo "Applied migration: $migration\n";
+        require_once $this->migrationsPath . '/' . $migration;
+
+        // Verificar que la función 'up' existe
+        if (!function_exists('up')) {
+            echo "Error: La función 'up' no está definida en la migración: $migration\n";
+            return;
+        }
+
+        try {
+            // Iniciar una transacción
+            $this->pdo->beginTransaction();
+
+            // Ejecutar la migración
+            up($this->pdo);
+
+            // Registrar la migración
+            $this->recordMigration($migration);
+
+            // Confirmar la transacción
+            $this->pdo->commit();
+
+            echo "Migración aplicada exitosamente: $migration\n";
+        } catch (Exception $e) {
+            // Revertir cambios si ocurre un error
+            $this->pdo->rollBack();
+            echo "Error al aplicar migración $migration: " . $e->getMessage() . "\n";
+        }
     }
 
-    private function logMigration($migration) {
-        $statement = $this->pdo->prepare("INSERT INTO migrations (migration) VALUES (:migration)");
-        $statement->execute(['migration' => $migration]);
+    // Registrar la migración como aplicada
+    private function recordMigration($migration) {
+        $query = "INSERT INTO migration_versions (version) VALUES (:version)";
+        $stmt = $this->pdo->prepare($query);
+        $stmt->bindParam(':version', $migration);
+        $stmt->execute();
     }
 }
+
