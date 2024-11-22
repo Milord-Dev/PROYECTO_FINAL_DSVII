@@ -8,21 +8,15 @@ class Database {
     private $conn;
     
     // Propiedades de configuración (para permitir diferentes configuraciones)
-    private $host;
-    private $dbname;
-    private $username;
-    private $password;
-    private $charset;
-
+    private $host = 'localhost'; // o el host adecuado
+    private $dbname = 'AgenciaViajes';
+    private $username = 'root';  // o el nombre de usuario adecuado
+    private $password = '';      // o la contraseña adecuada
+    private $charset = 'utf8mb4';
+    
     // Constructor privado para prevenir la creación directa de objetos
     private function __construct() {
-        // Cargar configuración desde variables de entorno (recomendado para producción)
-        $this->host = getenv('DB_HOST') ?: 'localhost'; // 'localhost' como valor por defecto
-        $this->dbname = getenv('DB_NAME') ?: 'AgenciaViajes';
-        $this->username = getenv('DB_USER') ?: 'root';  // 'root' como valor por defecto
-        $this->password = getenv('DB_PASS') ?: '';      // Contraseña vacía por defecto
-        $this->charset = 'admin123';                      // Charset para evitar problemas con caracteres especiales
-
+        // Configuración de la base de datos
         try {
             // Creamos la conexión PDO con un manejo de errores adecuado
             $dsn = "mysql:host=$this->host;dbname=$this->dbname;charset=$this->charset";
@@ -37,7 +31,7 @@ class Database {
         }
     }
 
-    // Método para obtener la instancia única de la clase (Singleton)
+    // Método para obtener la instancia única de la clase
     public static function getInstance() {
         if (self::$instance === null) {
             self::$instance = new self();
@@ -50,47 +44,20 @@ class Database {
         return $this->conn;
     }
 
-    // Método para desconectar la base de datos de forma segura
+    // Método para desconectar la base de datos
     public function disconnect() {
         $this->conn = null;
     }
 
     // Método para cambiar la base de datos sin tener que crear una nueva instancia
     public function setDatabase($dbname) {
-        try {
-            $this->dbname = $dbname;
-            // Cambiar la base de datos utilizando el comando SQL 'USE'
-            $this->conn->exec("USE $dbname");
-        } catch (PDOException $e) {
-            die("Failed to switch database: " . $e->getMessage());
-        }
+        $this->dbname = $dbname;
+        $this->conn->exec("USE $dbname");
     }
 
     // Método para obtener la base de datos actual
     public function getDatabase() {
         return $this->dbname;
     }
-
-    // Método para cambiar las credenciales de conexión
-    public function setCredentials($username, $password) {
-        $this->username = $username;
-        $this->password = $password;
-
-        try {
-            $this->conn = new PDO(
-                "mysql:host=$this->host;dbname=$this->dbname;charset=$this->charset",
-                $this->username,
-                $this->password,
-                [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false
-                ]
-            );
-        } catch (PDOException $e) {
-            die("Failed to update credentials: " . $e->getMessage());
-        }
-    }
 }
-
 ?>
